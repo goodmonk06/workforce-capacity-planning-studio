@@ -1,0 +1,112 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles         Role[]
+  members       Member[]
+  demandSeries  DemandSeries[]
+  simulations   SimulationRun[]
+
+  @@map("teams")
+}
+
+model Role {
+  id         String   @id @default(cuid())
+  teamId     String
+  name       String
+  hourlyCost Float    @default(0)
+  metaJson   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  members Member[]
+
+  @@index([teamId])
+  @@map("roles")
+}
+
+model Member {
+  id          String    @id @default(cuid())
+  teamId      String
+  roleId      String
+  name        String
+  weeklyHours Float     @default(40)
+  startDate   DateTime
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@index([roleId])
+  @@map("members")
+}
+
+model DemandSeries {
+  id           String   @id @default(cuid())
+  teamId       String
+  name         String
+  description  String?
+  horizonStart DateTime
+  horizonEnd   DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  team         Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  demandPoints DemandPoint[]
+  simulations  SimulationRun[]
+
+  @@index([teamId])
+  @@map("demand_series")
+}
+
+model DemandPoint {
+  id            String   @id @default(cuid())
+  seriesId      String
+  date          DateTime
+  requiredHours Float
+  metaJson      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  series DemandSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@index([seriesId])
+  @@index([date])
+  @@map("demand_points")
+}
+
+model SimulationRun {
+  id         String   @id @default(cuid())
+  teamId     String
+  seriesId   String
+  paramsJson Json?
+  resultJson Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  team   Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  series DemandSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@index([seriesId])
+  @@map("simulation_runs")
+}
