@@ -11,17 +11,25 @@ datasource db {
 }
 
 model Team {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   name        String
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  categoryId  String?
+  metaJson    Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  roles         Role[]
-  members       Member[]
-  demandSeries  DemandSeries[]
-  simulations   SimulationRun[]
+  category         TeamCategory?      @relation(fields: [categoryId], references: [id])
+  roles            Role[]
+  members          Member[]
+  demandSeries     DemandSeries[]
+  simulations      SimulationRun[]
+  projects         Project[]
+  timeOffPolicies  TimeOffPolicy[]
+  holidays         Holiday[]
+  tags             TeamTag[]
 
+  @@index([categoryId])
   @@map("teams")
 }
 
@@ -34,8 +42,9 @@ model Role {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  members Member[]
+  team       Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  members    Member[]
+  roleSkills RoleSkill[]
 
   @@index([teamId])
   @@map("roles")
@@ -46,14 +55,19 @@ model Member {
   teamId      String
   roleId      String
   name        String
+  email       String?
   weeklyHours Float     @default(40)
   startDate   DateTime
   endDate     DateTime?
+  metaJson    Json?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  team              Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  role              Role                @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  memberSkills      MemberSkill[]
+  timeOffRequests   TimeOffRequest[]
+  projectAllocations ProjectAllocation[]
 
   @@index([teamId])
   @@index([roleId])
@@ -63,18 +77,23 @@ model Member {
 model DemandSeries {
   id           String   @id @default(cuid())
   teamId       String
+  projectId    String?
   name         String
   description  String?
   horizonStart DateTime
   horizonEnd   DateTime
+  metaJson     Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  team         Team            @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team         Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  project      Project?           @relation(fields: [projectId], references: [id])
   demandPoints DemandPoint[]
   simulations  SimulationRun[]
+  tags         DemandSeriesTag[]
 
   @@index([teamId])
+  @@index([projectId])
   @@map("demand_series")
 }
 
@@ -98,15 +117,403 @@ model SimulationRun {
   id         String   @id @default(cuid())
   teamId     String
   seriesId   String
+  scenarioId String?
   paramsJson Json?
   resultJson Json?
+  status     String   @default("completed") // pending, running, completed, failed
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  team   Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  series DemandSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  team     Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  series   DemandSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  scenario Scenario?    @relation(fields: [scenarioId], references: [id])
+  alerts   Alert[]
 
   @@index([teamId])
   @@index([seriesId])
+  @@index([scenarioId])
   @@map("simulation_runs")
+}
+// Skills & Competencies
+model Skill {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  category    String? // e.g., "Technical", "Soft Skills", "Domain Knowledge"
+  metaJson    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roleSkills   RoleSkill[]
+  memberSkills MemberSkill[]
+
+  @@map("skills")
+}
+
+model RoleSkill {
+  id               String   @id @default(cuid())
+  roleId           String
+  skillId          String
+  requiredLevel    Int      @default(1) // 1-5 scale
+  importanceLevel  String   @default("nice_to_have") // required, preferred, nice_to_have
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  role  Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, skillId])
+  @@index([roleId])
+  @@index([skillId])
+  @@map("role_skills")
+}
+
+model MemberSkill {
+  id            String   @id @default(cuid())
+  memberId      String
+  skillId       String
+  proficiencyLevel Int   @default(1) // 1-5 scale
+  yearsOfExperience Float?
+  certifications String? // Comma-separated or JSON
+  lastAssessedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  skill  Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, skillId])
+  @@index([memberId])
+  @@index([skillId])
+  @@map("member_skills")
+}
+
+// Projects
+model Project {
+  id          String    @id @default(cuid())
+  teamId      String
+  name        String
+  description String?
+  status      String    @default("planning") // planning, active, on_hold, completed, cancelled
+  priority    String    @default("medium") // low, medium, high, critical
+  startDate   DateTime?
+  endDate     DateTime?
+  metaJson    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  team         Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  demandSeries DemandSeries[]
+  milestones   ProjectMilestone[]
+  allocations  ProjectAllocation[]
+  tags         ProjectTag[]
+
+  @@index([teamId])
+  @@index([status])
+  @@map("projects")
+}
+
+model ProjectMilestone {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  description String?
+  dueDate     DateTime
+  status      String   @default("pending") // pending, in_progress, completed, missed
+  metaJson    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([dueDate])
+  @@map("project_milestones")
+}
+
+model ProjectAllocation {
+  id              String    @id @default(cuid())
+  projectId       String
+  memberId        String
+  allocationPercent Float   @default(100) // Percentage of member's time allocated
+  startDate       DateTime
+  endDate         DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([memberId])
+  @@map("project_allocations")
+}
+
+// Time Management
+model TimeOffRequest {
+  id          String   @id @default(cuid())
+  memberId    String
+  type        String   // vacation, sick_leave, personal, training, unpaid
+  startDate   DateTime
+  endDate     DateTime
+  hours       Float? // Total hours if not full days
+  status      String   @default("pending") // pending, approved, rejected, cancelled
+  reason      String?
+  approvedBy  String?
+  approvedAt  DateTime?
+  rejectedReason String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@index([status])
+  @@index([startDate])
+  @@map("time_off_requests")
+}
+
+model TimeOffPolicy {
+  id              String   @id @default(cuid())
+  teamId          String
+  name            String
+  type            String   // vacation, sick_leave, etc.
+  annualDays      Int      @default(0)
+  carryoverDays   Int      @default(0)
+  requiresApproval Boolean @default(true)
+  description     String?
+  metaJson        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("time_off_policies")
+}
+
+model Holiday {
+  id          String   @id @default(cuid())
+  teamId      String?  // Nullable for company-wide holidays
+  name        String
+  date        DateTime
+  isRecurring Boolean  @default(false)
+  country     String?
+  region      String?
+  metaJson    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team Team? @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@index([date])
+  @@map("holidays")
+}
+
+// Scenarios
+model Scenario {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  baselineSimulationId String? // Reference to a baseline simulation
+  status      String   @default("draft") // draft, active, archived
+  createdBy   String?
+  metaJson    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assumptions  ScenarioAssumption[]
+  simulations  SimulationRun[]
+
+  @@map("scenarios")
+}
+
+model ScenarioAssumption {
+  id          String   @id @default(cuid())
+  scenarioId  String
+  type        String   // new_hire, team_change, scope_change, efficiency_improvement
+  description String
+  impact      Json     // Structured data about the assumption's impact
+  effectiveDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  scenario Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("scenario_assumptions")
+}
+
+// Alerting
+model Alert {
+  id            String   @id @default(cuid())
+  simulationId  String
+  ruleId        String?
+  severity      String   // info, warning, critical
+  title         String
+  message       String
+  context       Json? // Additional context data
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  simulation SimulationRun @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+  rule       AlertRule?    @relation(fields: [ruleId], references: [id])
+
+  @@index([simulationId])
+  @@index([ruleId])
+  @@index([severity])
+  @@map("alerts")
+}
+
+model AlertRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  condition   Json     // Condition logic in structured format
+  severity    String   // info, warning, critical
+  enabled     Boolean  @default(true)
+  notificationChannels String? // Comma-separated channels
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  alerts Alert[]
+
+  @@map("alert_rules")
+}
+
+// Reporting
+model Report {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // capacity_summary, utilization_trends, cost_analysis, skill_gaps
+  format      String   // pdf, csv, json, excel
+  parameters  Json?
+  generatedBy String?
+  fileUrl     String?  // S3 URL or file path
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model Snapshot {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  snapshotDate DateTime
+  dataJson    Json     // Snapshot of capacity data at a point in time
+  metaJson    Json?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([snapshotDate])
+  @@map("snapshots")
+}
+
+// Tagging & Organization
+model Tag {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  color       String?  // Hex color
+  description String?
+  category    String? // For grouping tags
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  teamTags         TeamTag[]
+  projectTags      ProjectTag[]
+  demandSeriesTags DemandSeriesTag[]
+
+  @@map("tags")
+}
+
+model TeamTag {
+  id        String   @id @default(cuid())
+  teamId    String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, tagId])
+  @@index([teamId])
+  @@index([tagId])
+  @@map("team_tags")
+}
+
+model ProjectTag {
+  id        String   @id @default(cuid())
+  projectId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, tagId])
+  @@index([projectId])
+  @@index([tagId])
+  @@map("project_tags")
+}
+
+model DemandSeriesTag {
+  id        String   @id @default(cuid())
+  seriesId  String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  series DemandSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  tag    Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, tagId])
+  @@index([seriesId])
+  @@index([tagId])
+  @@map("demand_series_tags")
+}
+
+model TeamCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  parentId    String? // For hierarchical categories
+  color       String?
+  icon        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  teams    Team[]
+  parent   TeamCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children TeamCategory[] @relation("CategoryHierarchy")
+
+  @@index([parentId])
+  @@map("team_categories")
+}
+
+// Audit Log for sensitive operations
+model AuditLog {
+  id          String   @id @default(cuid())
+  entityType  String   // team, member, simulation, etc.
+  entityId    String
+  action      String   // created, updated, deleted, exported
+  userId      String?  // Who performed the action
+  changes     Json?    // What changed
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
